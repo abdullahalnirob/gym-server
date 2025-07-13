@@ -6,17 +6,25 @@ const { ObjectId } = require("mongodb");
 const cookieParser = require("cookie-parser");
 const { MongoClient } = require("mongodb");
 require("dotenv").config();
+
 // middleware
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(cors(
+  {
+    origin: "http://localhost:5173",
+    credentials: true,
+  }
+));
+
 // mongodb
 const uri = process.env.MONGO_URI;
 const client = new MongoClient(uri);
 const database = client.db("Gym");
 const usercollection = database.collection("allUsers");
 const pendingtrainer = database.collection("pendingTriainer");
+
 async function run() {
   try {
     await client.connect();
@@ -28,6 +36,7 @@ async function run() {
   }
 }
 run().catch(console.dir);
+
 // routes
 app.get("/", (req, res) => {
   res.send("Hello World!");
@@ -97,6 +106,7 @@ app.post("/api/pendingtrainer", async (req, res) => {
     res.status(400).send({ message: "Data is not inserted" });
   }
 });
+
 app.get("/api/pendingtrainer", async (req, res) => {
   try {
     const users = await pendingtrainer.find().toArray();
@@ -105,6 +115,7 @@ app.get("/api/pendingtrainer", async (req, res) => {
     res.status(400).send({ message: "Something error in server." });
   }
 });
+
 app.delete("/api/pendingtrainer/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -119,6 +130,7 @@ app.delete("/api/pendingtrainer/:id", async (req, res) => {
     res.status(500).json({ error: "Invalid ID or server error" });
   }
 });
+
 app.patch("/api/users", async (req, res) => {
   const {
     trainerEmail,
@@ -163,6 +175,8 @@ app.patch("/api/users", async (req, res) => {
     res.status(500).json({ error: "Server error while updating trainer" });
   }
 });
+
+// Fixed endpoint - এখানে সমস্যা সমাধান করা হয়েছে
 app.patch("/api/users/role-to-user/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -174,30 +188,45 @@ app.patch("/api/users/role-to-user/:id", async (req, res) => {
   }
 
   try {
-    const result = await usercollection.findOneAndUpdate(
+    // প্রথমে চেক করি যে user exists কিনা এবং trainer role আছে কিনা
+    const existingUser = await usercollection.findOne({ 
+      _id: new ObjectId(id), 
+      role: "trainer" 
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Trainer not found or user is not a trainer" 
+      });
+    }
+
+    // এবার update করি
+    const result = await usercollection.updateOne(
       { _id: new ObjectId(id), role: "trainer" },
       {
         $set: { role: "user", status: "disapproved" },
         $unset: {
-          skills: "", socials: "", 
-          availableDays: "", availableSlots: "", experience: ""
+          skills: "", 
+          socials: "", 
+          availableDays: "", 
+          availableSlots: "", 
+          experience: ""
         }
-      },
-      { returnDocument: "after" }
+      }
     );
 
-    if (!result.value) {
-      return res.status(404).json({ 
+    if (result.modifiedCount > 0) {
+      res.json({ 
+        success: true,
+        message: "Trainer role successfully changed to user" 
+      });
+    } else {
+      res.status(400).json({ 
         success: false,
-        message: "Trainer not found or already a user" 
+        message: "Failed to update trainer role" 
       });
     }
-
-    res.json({ 
-      success: true,
-      message: "Trainer role successfully updated to user",
-      user: result.value 
-    });
 
   } catch (error) {
     console.error("Error:", error);
@@ -209,5 +238,5 @@ app.patch("/api/users/role-to-user/:id", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`server is runnign at http://localhost:${port}`);
+  console.log(`server is running at http://localhost:${port}`);
 });
