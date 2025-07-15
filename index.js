@@ -11,12 +11,12 @@ require("dotenv").config();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors(
-  {
+app.use(
+  cors({
     origin: "http://localhost:5173",
     credentials: true,
-  }
-));
+  })
+);
 
 // mongodb
 const uri = process.env.MONGO_URI;
@@ -24,6 +24,7 @@ const client = new MongoClient(uri);
 const database = client.db("Gym");
 const usercollection = database.collection("allUsers");
 const pendingtrainer = database.collection("pendingTriainer");
+const classcollection = database.collection("classes");
 
 async function run() {
   try {
@@ -77,8 +78,6 @@ app.get("/api/user", async (req, res) => {
   if (!_id) {
     return res.status(400).json({ error: "_id query parameter is required" });
   }
-
-  // Validate ObjectId
   if (!ObjectId.isValid(_id)) {
     return res.status(400).json({ error: "Invalid _id format" });
   }
@@ -176,66 +175,140 @@ app.patch("/api/users", async (req, res) => {
   }
 });
 
-// Fixed endpoint - এখানে সমস্যা সমাধান করা হয়েছে
 app.patch("/api/users/role-to-user/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       success: false,
-      message: "Invalid user ID format" 
+      message: "Invalid user ID format",
     });
   }
 
   try {
-    // প্রথমে চেক করি যে user exists কিনা এবং trainer role আছে কিনা
-    const existingUser = await usercollection.findOne({ 
-      _id: new ObjectId(id), 
-      role: "trainer" 
+    const existingUser = await usercollection.findOne({
+      _id: new ObjectId(id),
+      role: "trainer",
     });
 
     if (!existingUser) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Trainer not found or user is not a trainer" 
+        message: "Trainer not found or user is not a trainer",
       });
     }
 
-    // এবার update করি
     const result = await usercollection.updateOne(
       { _id: new ObjectId(id), role: "trainer" },
       {
         $set: { role: "user", status: "disapproved" },
         $unset: {
-          skills: "", 
-          socials: "", 
-          availableDays: "", 
-          availableSlots: "", 
-          experience: ""
-        }
+          skills: "",
+          socials: "",
+          availableDays: "",
+          availableSlots: "",
+          experience: "",
+        },
       }
     );
 
     if (result.modifiedCount > 0) {
-      res.json({ 
+      res.json({
         success: true,
-        message: "Trainer role successfully changed to user" 
+        message: "Trainer role successfully changed to user",
       });
     } else {
-      res.status(400).json({ 
+      res.status(400).json({
         success: false,
-        message: "Failed to update trainer role" 
+        message: "Failed to update trainer role",
       });
     }
-
   } catch (error) {
     console.error("Error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Internal server error" 
+      message: "Internal server error",
     });
   }
 });
+
+app.patch("/api/user-to-admin/:id", async (req, res) => {
+  const { id } = req.params;
+
+  console.log("id at 167 line", id);
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid user ID format" });
+  }
+
+  try {
+    const filter = {
+      _id: new ObjectId(id),
+      role: "user", 
+    };
+
+    const updateDoc = {
+      $set: {
+        role: "admin",
+      },
+    };
+
+    const result = await usercollection.updateOne(filter, updateDoc);
+
+    if (result.modifiedCount > 0) {
+      res.status(200).json({ message: "User successfully promoted to admin" });
+    } else {
+      res
+        .status(404)
+        .json({ error: "User not found, already admin, or not a user" });
+    }
+  } catch (error) {
+    console.error("Error updating user:", error);
+    res.status(500).json({ error: "Server error while updating user role" });
+  }
+});
+
+app.post("/api/classes", async (req, res) => {
+  try {
+    const data = req.body;
+    const result = await classcollection.insertOne(data);
+    return res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/api/classes", async (_req, res) => {
+  try {
+    const result = await classcollection.find().toArray();
+    return res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+
+app.delete("/api/classes/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid class ID" });
+  }
+
+  try {
+    const result = await classcollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Class not found" });
+    }
+
+    res.json({ message: "Class deleted successfully" });
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.status(500).json({ error: "Server error while deleting class" });
+  }
+});
+
 
 app.listen(port, () => {
   console.log(`server is running at http://localhost:${port}`);
